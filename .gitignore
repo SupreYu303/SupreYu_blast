@@ -1,11 +1,16 @@
-# 忽略虚拟环境
-.venv/
+# Python 环境与缓存
 __pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
 
-# 忽略本地测试的 PDF 论文和临时生成的图片
+# 业务数据与隐私文件 (极其重要)
 pdfs/
-*.jpg
-*.png
-
-# 忽略本地生成的 Excel 结果库和 txt 日志
 outputs/
+temp_page_*.jpg
+.env
+
+# 机器学习模型权重 (建议让别人拉取代码后自己本地训练)
+models/*.pkl
