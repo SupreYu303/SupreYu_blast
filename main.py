@@ -11,11 +11,11 @@ import re
 from paddleocr import PaddleOCR
 
 # ================= 1. API 配置 =================
-TEXT_API_KEY = "your_deepseek_key_here"  
+TEXT_API_KEY = "1111"  
 TEXT_BASE_URL = "https://api.deepseek.com"
 text_client = OpenAI(api_key=TEXT_API_KEY, base_url=TEXT_BASE_URL)
 
-VISION_API_KEY = "your_deepseek_key_here" 
+VISION_API_KEY = "11111" 
 VISION_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1" 
 VISION_MODEL = "qwen-vl-max" 
 vision_client = OpenAI(api_key=VISION_API_KEY, base_url=VISION_BASE_URL)

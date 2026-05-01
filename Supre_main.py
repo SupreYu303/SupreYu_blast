@@ -14,12 +14,12 @@ from paddleocr import PaddleOCR
 # ⚙️ 1. 核心引擎与 API 配置区
 # =====================================================================
 # 🔴 [文本大脑] 负责处理 OCR 和纯文本提取表格参数 (推荐 DeepSeek)
-TEXT_API_KEY = "your_deepseek_key_here"  
+TEXT_API_KEY = "11111"  
 TEXT_BASE_URL = "https://api.deepseek.com"
 text_client = OpenAI(api_key=TEXT_API_KEY, base_url=TEXT_BASE_URL)
 
 # 🔴 [视觉大脑] 负责看炮眼布置平面图提取空间尺寸 (如通义千问 Qwen-VL)
-VISION_API_KEY = "your_deepseek_key_here" 
+VISION_API_KEY = "111111" 
 VISION_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1" 
 VISION_MODEL = "qwen-vl-max" 
 vision_client = OpenAI(api_key=VISION_API_KEY, base_url=VISION_BASE_URL)
@@ -58,12 +58,16 @@ def extract_diagram_params(image_path):
     如果没有图纸直接返回：{}
     如果有图纸，请顺着标注线提取参数（没有填 null）：
     {
-      "图纸_掏槽眼布置形状": "string",
-      "图纸_一阶掏槽眼圈径_mm": "string或float",
-      "图纸_二阶掏槽眼圈径_mm": "string或float",
-      "图纸_辅助眼孔距_mm": "string或float",
+      "图纸_掏槽眼布置形状": "string(如:桶形,角柱形)",
+      "图纸_一阶掏槽圈径_mm": "string或float",
+      "图纸_二阶掏槽圈径_mm": "string或float",
+      "图纸_内圈辅助眼孔距_mm": "string或float",
+      "图纸_内圈辅助眼圈径_mm": "string或float",
+      "图纸_外圈辅助眼孔距_mm": "string或float",
+      "图纸_外圈辅助眼圈径_mm": "string或float",
       "图纸_周边眼孔距_mm": "string或float",
-      "图纸_周边眼圈径_mm": "string或float"
+      "图纸_周边眼圈径_mm": "string或float",
+      "图纸_周边眼最小抵抗线_mm": "string或float"
     }
     """
     try:
@@ -82,13 +86,66 @@ def extract_diagram_params(image_path):
 def extract_text_params(text, source_name):
     """【文本模型】从杂乱文本中提取 40+ 核心参数"""
     target_schema = {
-        "基础参数": {"井筒荒径_m": "float/null", "井筒净径_m": "float/null", "井深_m": "float/null", "岩性": "string/null", "f值_普氏硬度": "float/null"},
-        "总体爆破": {"炸药类型": "string/null", "装药方式": "string/null", "炮孔直径_mm": "float/null", "单循环进尺_m": "float/null", "总炮眼数": "int/null", "总装药量_kg": "float/null"},
-        "掏槽眼": {"掏槽眼数": "int/null", "掏槽眼孔深_mm": "float/null", "掏槽眼平均孔距_mm": "float/null", "一阶掏槽眼单孔装药量_kg": "float/null"},
-        "辅助眼": {"辅助眼数": "int/null", "辅助眼平均孔深_m": "float/null", "辅助眼平均孔距_mm": "float/null", "辅助眼单孔装药量_kg": "float/null"},
-        "周边眼": {"周边眼数": "int/null", "周边眼孔深_m": "float/null", "周边眼孔距_mm": "float/null", "周边眼单孔装药量_kg": "float/null", "周边眼圈径_mm": "float/null"}
+        "基础参数": {
+            "井筒荒径_m": "float/null", 
+            "井筒净径_m": "float/null", 
+            "井深_m": "float/null", 
+            "断面面积_m2": "float/null",
+            "岩性": "string/null", 
+            "f值_普氏硬度": "float/null"
+        },
+        "总体爆破": {
+            "炸药类型": "string/null", 
+            "装药方式": "string/null", 
+            "炮孔直径_mm": "float/null", 
+            "单循环进尺_m": "float/null", 
+            "总炮眼数": "int/null", 
+            "总装药量_kg": "float/null",
+            "炮孔利用率_%": "float/null",
+            "单位炸药消耗量_kg/m3": "float/null"
+        },
+        "掏槽眼参数": {
+            "掏槽眼总数": "int/null", 
+            "一阶掏槽眼数": "int/null", 
+            "一阶掏槽眼深_mm": "float/null", 
+            "一阶掏槽单孔装药_kg": "float/null",
+            "二阶/三阶掏槽眼数": "int/null",
+            "二阶/三阶掏槽眼深_mm": "float/null",
+            "二阶/三阶掏槽单孔装药_kg": "float/null"
+        },
+        "辅助眼参数": {
+            "辅助眼总数": "int/null", 
+            "内圈辅助眼数": "int/null", 
+            "内圈辅助眼孔深_m": "float/null",
+            "外圈辅助眼数": "int/null",
+            "外圈辅助眼孔深_m": "float/null",
+            "辅助眼平均单孔装药_kg": "float/null"
+        },
+        "周边眼参数": {
+            "周边眼数": "int/null", 
+            "周边眼孔深_m": "float/null", 
+            "周边眼孔距_mm": "float/null", 
+            "周边眼最小抵抗线_mm": "float/null",
+            "周边眼单孔装药量_kg": "float/null"
+        }
     }
-    prompt = f"你是数据清洗专家。提取爆破参数，找不到填 null。格式：{json.dumps(target_schema, ensure_ascii=False)}\n文本内容：{text}"
+    # 👇👇👇 替换原有的 prompt，开启第四维度：证据链溯源 👇👇👇
+    prompt = f"""你是资深采矿数据清洗专家。请提取爆破参数，找不到填 null。
+【第四维度：证据链溯源指令】
+为了保证工程数据的绝对可靠，对于每一个成功提取到的参数，你必须摘录出能证明该数据的“原文半句话”。
+请在输出的 JSON 中，为每一个有数据的参数额外新增一个带有 `_原文依据` 后缀的字段。
+示例格式：
+{{
+  "单循环进尺_m": 2.5,
+  "单循环进尺_m_原文依据": "本月单循环进尺为2.5m",
+  "炮孔直径_mm": 42,
+  "炮孔直径_mm_原文依据": "选用直径42mm的一字形钎头"
+}}
+目标核心参数清单：{json.dumps(target_schema, ensure_ascii=False)}
+
+待解析文本内容：
+{text}"""
+    # 👆👆👆 ================================================= 👆👆👆
     try:
         response = text_client.chat.completions.create(
             model="deepseek-chat", messages=[{"role": "user", "content": prompt}], temperature=0.0
@@ -183,6 +240,8 @@ def process_single_paper(pdf_path):
 
     doc_fitz.close()
     pdf_pdfium.close()
+    with open(f"outputs/{os.path.basename(pdf_path)}_提取日志.txt", "w", encoding="utf-8") as f:
+        f.write(f"【PyMuPDF 原生文本】\n{native_text_full}\n\n【OCR 视觉文本】\n{ocr_text_full}")
     return native_text_full, ocr_text_full, diagram_data_full
 
 def main():
@@ -225,9 +284,24 @@ def main():
         cols = ['论文来源', '交叉验证警报'] + [c for c in df.columns if c not in ['论文来源', '交叉验证警报']]
         df = df[cols]
         
+        # ... (前面的 to_excel 不变) ...
         out_file = os.path.join(output_dir, f"blasting_CBR_dataset_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
         df.to_excel(out_file, index=False)
-        print(f"\n🎉 终极特征库组装完成！共计 {len(final_dataset)} 篇，数据已锚定至: {out_file}")
+        print(f"\n🎉 原始特征库已锚定至: {out_file}")
+        
+        # 👇 👇 👇 新增的挂载逻辑 👇 👇 👇
+        print("\n=====================================")
+        print("启动第二阶段：数据黑洞修复")
+        # 引入我们刚才写好的补全引擎
+        from imputation_engine import BlastingDataImputer
+        
+        # 填入你的 DeepSeek API Key (为了让大模型做脑补)
+        imputer = BlastingDataImputer(api_key="111111")
+        
+        # 把刚才生成的粗糙 Excel 扔进补全引擎里
+        final_perfect_file = imputer.process_excel(out_file)
+        
+        print("\n🚀 grandMining 底层数据准备彻底完成，随时可以对接 CBR 推理算法！")
         print("💡 建议：打开 Excel 后，优先排查 [交叉验证警报] 列中非“完美一致”的字段。")
 
 if __name__ == "__main__":

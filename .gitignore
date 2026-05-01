@@ -1,0 +1,11 @@
+# 忽略虚拟环境
+.venv/
+__pycache__/
+
+# 忽略本地测试的 PDF 论文和临时生成的图片
+pdfs/
+*.jpg
+*.png
+
+# 忽略本地生成的 Excel 结果库和 txt 日志
+outputs/
