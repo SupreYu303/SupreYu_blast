@@ -30,13 +30,7 @@
 - `imputation_engine.py` : 清洗中枢。负责物理安规约束、加载/训练 XGBoost 经验库、以及大模型零温高压修正。
 - `cnki_downloader.py` : 数据获取端。
 
-## ⚙️ 极速启动
-
-**1. 依赖安装**
-```bash
-pip install pandas numpy xgboost scikit-learn openai PyMuPDF paddlepaddle paddleocr pypdfium2 pillow
-
-2. 环境变量
+- ##  环境变量
 需在脚本中配置大模型密钥：
 
 TEXT_API_KEY: DeepSeek API (文本重构与证据链)
@@ -58,3 +52,11 @@ python imputation_engine.py
 - **小样本“数据黑洞”完美修复**：通过独创的“三重插补引擎”，将严重残缺（缺失率>50%）的原始工程记录还原为具备严密物理闭环逻辑的完整参数表，彻底解决矿建领域“数据少、数据脏”的痛点。
 - **多模态图纸零代码解析**：摆脱了人工审图与 CAD 尺规量测的繁琐，实现大模型对《炮眼布置平面图》中掏槽圈径、孔距等几何参数的“秒级”视觉抽取。
 - **构建 100% 可信审计追踪链**：产出的每一条关键工程参数均锚定“原文依据截句”，满足工业应用对数据透明度和安全审计的严苛要求。
+
+## ⚙️ 极速启动
+
+** 依赖安装**
+```bash
+pip install pandas numpy xgboost scikit-learn openai PyMuPDF paddlepaddle paddleocr pypdfium2 pillow
+
+
