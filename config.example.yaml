@@ -1,0 +1,21 @@
+# grandMining 核心配置模板文件
+# 💡 使用方法：将此文件重命名为 config.yaml，并填入你自己的真实的 API Key
+
+api:
+  text:
+    key: "sk-请替换为你的DeepSeek_API_KEY"
+    base_url: "https://api.deepseek.com"
+    model: "deepseek-chat"
+  vision:
+    key: "sk-请替换为你的通义千问/视觉大模型_API_KEY"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model: "qwen-vl-plus"
+
+paths:
+  pdf_dir: "pdfs"
+  output_dir: "outputs"
+  model_dir: "models"
+  txt_dir: "txt_inputs"
+
+settings:
+  max_workers: 5  # 线程池并发数

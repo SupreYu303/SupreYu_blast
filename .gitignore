@@ -9,8 +9,10 @@ env/
 # 业务数据与隐私文件 (极其重要)
 pdfs/
 outputs/
+txt_inputs/
 temp_page_*.jpg
 .env
+config.yaml
 
 # 机器学习模型权重 (建议让别人拉取代码后自己本地训练)
 models/*.pkl

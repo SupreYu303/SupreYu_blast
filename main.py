@@ -9,16 +9,12 @@ import datetime
 import base64
 import re
 from paddleocr import PaddleOCR
+from config import TEXT_API_KEY, TEXT_BASE_URL, TEXT_MODEL, QWEN_API_KEY, QWEN_BASE_URL, QWEN_MODEL, PDF_DIR, OUTPUT_DIR
 
 # ================= 1. API 配置 =================
-TEXT_API_KEY = "1111"  
-TEXT_BASE_URL = "https://api.deepseek.com"
 text_client = OpenAI(api_key=TEXT_API_KEY, base_url=TEXT_BASE_URL)
 
-VISION_API_KEY = "11111" 
-VISION_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1" 
-VISION_MODEL = "qwen-vl-max" 
-vision_client = OpenAI(api_key=VISION_API_KEY, base_url=VISION_BASE_URL)
+vision_client = OpenAI(api_key=QWEN_API_KEY, base_url=QWEN_BASE_URL)
 
 print("⚡ 正在启动【极速轻量版】视觉与 OCR 引擎...")
 # 🔴 提速核心 1：强制使用轻量级 mobile 模型，放弃缓慢的 server 模型！
@@ -57,7 +53,7 @@ def extract_diagram_params(image_path):
     """
     try:
         response = vision_client.chat.completions.create(
-            model=VISION_MODEL,
+            model=QWEN_MODEL,
             messages=[
                 {"role": "user", "content": [
                     {"type": "text", "text": prompt},
@@ -81,7 +77,7 @@ def extract_text_params(text):
     prompt = f"提取爆破参数。找不到填 null。格式：{json.dumps(target_schema, ensure_ascii=False)}\n文本：{text}"
     try:
         response = text_client.chat.completions.create(
-            model="deepseek-chat", messages=[{"role": "user", "content": prompt}], temperature=0.0
+            model=TEXT_MODEL, messages=[{"role": "user", "content": prompt}], temperature=0.0
         )
         return robust_parse_json(response.choices[0].message.content)
     except Exception:
@@ -170,8 +166,8 @@ def process_pdf_smart(pdf_path):
     return full_text, merged_diagram_data
 
 def main():
-    pdf_dir = "pdfs/"
-    output_dir = "outputs/"
+    pdf_dir = PDF_DIR
+    output_dir = OUTPUT_DIR
     if not os.path.exists(output_dir): os.makedirs(output_dir)
     all_data = []
     
