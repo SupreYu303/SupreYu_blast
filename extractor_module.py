@@ -2,12 +2,15 @@ import pypdfium2 as pdfium
 import fitz  # 用于提取纯文本层和探测图纸
 from PIL import Image
 import pandas as pd
-from openai import OpenAI
+from openai import AsyncOpenAI
 import json
 import os
 import datetime
 import base64
 import re
+import uuid
+import asyncio
+import concurrent.futures
 from paddleocr import PaddleOCR
 from config import TEXT_API_KEY, TEXT_BASE_URL, TEXT_MODEL, VISION_API_KEY, VISION_BASE_URL, VISION_MODEL, PDF_DIR, OUTPUT_DIR
 
@@ -15,10 +18,10 @@ from config import TEXT_API_KEY, TEXT_BASE_URL, TEXT_MODEL, VISION_API_KEY, VISI
 # ⚙️ 1. 核心引擎与 API 配置区
 # =====================================================================
 # 🔴 [文本大脑] 负责处理 OCR 和纯文本提取表格参数 (推荐 DeepSeek)
-text_client = OpenAI(api_key=TEXT_API_KEY, base_url=TEXT_BASE_URL)
+text_client = AsyncOpenAI(api_key=TEXT_API_KEY, base_url=TEXT_BASE_URL)
 
 # 🔴 [视觉大脑] 负责看炮眼布置平面图提取空间尺寸 (如通义千问 Qwen-VL)
-vision_client = OpenAI(api_key=VISION_API_KEY, base_url=VISION_BASE_URL)
+vision_client = AsyncOpenAI(api_key=VISION_API_KEY, base_url=VISION_BASE_URL)
 
 print("🚀 正在点火：三核混合特征提取系统 (PyMuPDF + PaddleOCR + VLM)...")
 # 强制加载轻量级模型 PP-OCRv4，关闭 MKLDNN 防崩溃
@@ -46,9 +49,8 @@ def encode_image_to_base64(image_path):
 # =====================================================================
 # 🧠 3. AI 识别与交叉验证逻辑
 # =====================================================================
-def extract_diagram_params(image_path):
+async def extract_diagram_params(base64_image):
     """【视觉模型】审视图纸，提取炮孔布置尺寸"""
-    base64_image = encode_image_to_base64(image_path)
     prompt = """
     你是采矿工程师。检查图中是否有“井筒/巷道炮眼布置平面图”。
     如果没有图纸直接返回：{}
@@ -67,7 +69,7 @@ def extract_diagram_params(image_path):
     }
     """
     try:
-        response = vision_client.chat.completions.create(
+        response = await vision_client.chat.completions.create(
             model=VISION_MODEL,
             messages=[{"role": "user", "content": [
                 {"type": "text", "text": prompt},
@@ -79,10 +81,12 @@ def extract_diagram_params(image_path):
     except Exception:
         return {}
 
-def extract_text_params(text, source_name):
+async def extract_text_params(text, source_name):
     """【文本模型】从杂乱文本中提取 40+ 核心参数"""
     target_schema = {
         "基础参数": {
+            "工程地点_或_工作面名称": "string/null",  # <--- 加上这一行，大模型就会自动帮你提取
+            "作者工作单位": "string/null",         # <--- 加上这一行，大模型就会自动帮你提取
             "井筒荒径_m": "float/null", 
             "井筒净径_m": "float/null", 
             "井深_m": "float/null", 
@@ -143,7 +147,7 @@ def extract_text_params(text, source_name):
 {text}"""
     # 👆👆👆 ================================================= 👆👆👆
     try:
-        response = text_client.chat.completions.create(
+        response = await text_client.chat.completions.create(
             model=TEXT_MODEL, messages=[{"role": "user", "content": prompt}], temperature=0.0
         )
         # 将结果展平为一维字典
@@ -193,7 +197,7 @@ def process_single_paper(pdf_path):
     
     native_text_full = ""
     ocr_text_full = ""
-    diagram_data_full = {}
+    base64_diagrams = []  # 缓存所有图纸的 Base64 编码，留给大模型后续并发处理
     
     for page_num in range(len(doc_fitz)):
         print(f"  > 扫描第 {page_num + 1}/{len(doc_fitz)} 页...")
@@ -214,7 +218,8 @@ def process_single_paper(pdf_path):
         if pil_image.mode in ('RGBA', 'LA'): white_bg.paste(pil_image, mask=pil_image.split()[-1])
         else: white_bg.paste(pil_image)
             
-        temp_img_path = f"temp_page_{page_num}.jpg"
+        # 使用 UUID 生成独一无二的乱码前缀，彻底避免多线程文件名冲突
+        temp_img_path = f"temp_{uuid.uuid4().hex[:8]}_page_{page_num}.jpg"
         white_bg.save(temp_img_path, "JPEG")
         
         # 强制 OCR 视觉扫字 (用于验证和兜底)
@@ -226,11 +231,8 @@ def process_single_paper(pdf_path):
 
         # 路线C：多模态图纸狙击
         if has_images:
-            print("    [发现内嵌图形] 呼叫视觉大模型检索图纸参数...")
-            diag_data = extract_diagram_params(temp_img_path)
-            if diag_data:
-                for k, v in diag_data.items():
-                    if v is not None and str(v).lower() != "null": diagram_data_full[k] = v
+            print("    [发现内嵌图形] 正在将其编码入队，准备进行视觉提取...")
+            base64_diagrams.append(encode_image_to_base64(temp_img_path))
                     
         if os.path.exists(temp_img_path): os.remove(temp_img_path)
 
@@ -238,7 +240,7 @@ def process_single_paper(pdf_path):
     pdf_pdfium.close()
     with open(f"outputs/{os.path.basename(pdf_path)}_提取日志.txt", "w", encoding="utf-8") as f:
         f.write(f"【PyMuPDF 原生文本】\n{native_text_full}\n\n【OCR 视觉文本】\n{ocr_text_full}")
-    return native_text_full, ocr_text_full, diagram_data_full
+    return native_text_full, ocr_text_full, base64_diagrams
 
 def run_extraction_and_imputation(deepseek_key):
     pdf_dir = PDF_DIR
@@ -251,21 +253,36 @@ def run_extraction_and_imputation(deepseek_key):
     def process_pdf(filename):
         pdf_path = os.path.join(pdf_dir, filename)
         
-        # 1. 物理层解析获取全量素材
-        native_txt, ocr_txt, diagram_data = process_single_paper(pdf_path)
+        # 1. 物理层解析获取全量素材 (CPU计算层：提取文本与渲染图纸)
+        native_txt, ocr_txt, base64_diagrams = process_single_paper(pdf_path)
         
-        # 2. 让大模型理解两路文本
-        print(f"  > [逻辑重构 {filename}] 分析底层原生文本...")
-        native_params = extract_text_params(native_txt, f"{filename}-底层文本")
+        # 2. 并发网络层：让大模型“同时”理解多轨文本与图纸
+        async def fetch_all_llm_tasks():
+            print(f"  > [异步网络层 {filename}] ⚡ 正在并发请求大模型进行文本与图纸特征抽取...")
+            tasks = [
+                extract_text_params(native_txt, f"{filename}-底层文本"),
+                extract_text_params(ocr_txt, f"{filename}-OCR文本")
+            ]
+            for b64 in base64_diagrams:
+                tasks.append(extract_diagram_params(b64))
+            return await asyncio.gather(*tasks)
         
-        print(f"  > [逻辑重构 {filename}] 分析 OCR 视觉文本...")
-        ocr_params = extract_text_params(ocr_txt, f"{filename}-OCR文本")
+        # 执行并发任务，解包结果
+        results = asyncio.run(fetch_all_llm_tasks())
+        native_params = results[0]
+        ocr_params = results[1]
+        diagram_results = results[2:]
         
         # 3. 裁判进行数据交叉验证
         final_row = cross_validate_and_merge(native_params, ocr_params)
         final_row["论文来源"] = filename
         
         # 4. 缝合图纸空间参数
+        diagram_data = {}
+        for dr in diagram_results:
+            for k, v in dr.items():
+                if v is not None and str(v).lower() != "null": diagram_data[k] = v
+                
         if diagram_data:
             print(f"  > 🎯 完美融合图纸参数: {list(diagram_data.keys())}")
             final_row.update(diagram_data)
@@ -274,7 +291,7 @@ def run_extraction_and_imputation(deepseek_key):
         return final_row
 
     # 采用最大 5 个工作线程并发解析多篇 PDF
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         results = list(executor.map(process_pdf, pdf_files))
         final_dataset.extend([r for r in results if r])
 

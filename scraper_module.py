@@ -170,4 +170,4 @@ def auto_download_cnki(keyword="立井爆破", max_pages=1):
         driver.quit()
 
 if __name__ == "__main__":
-    auto_download_cnki(keyword="立井掏槽", max_pages=7)
+    auto_download_cnki(keyword="立井爆破", max_pages=7)

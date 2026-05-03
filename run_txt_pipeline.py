@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import asyncio
 from extractor_module import extract_text_params
 from imputation_engine import BlastingDataImputer
 from config import TEXT_API_KEY as DEEPSEEK_API_KEY, TXT_DIR, OUTPUT_DIR
@@ -35,8 +36,8 @@ def main():
                 
             print(f"📖 正在解析文稿: {filename} (字符数: {len(raw_text)})")
             
-            # 直接调用提取模块的文本大脑
-            params = extract_text_params(raw_text, filename)
+            # 直接调用提取模块的文本大脑 (包裹为异步运行)
+            params = asyncio.run(extract_text_params(raw_text, filename))
             
             if params:
                 params["论文来源"] = filename

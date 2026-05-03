@@ -5,6 +5,8 @@
     "ROCK_HARDNESS_THRESHOLD": 8
   },
   "bounds": {
+    "MIN_ADVANCE_M": 1.0,
+    "MAX_ADVANCE_M": 5.0,
     "MIN_HOLE_DEPTH_M": 0.6,
     "MAX_HOLE_DEPTH_M": 6.0,
     "MIN_RESISTANCE_LINE_MM": 300.0,
@@ -12,8 +14,41 @@
     "MAX_AUXILIARY_CHARGE_KG": 6.0,
     "MAX_CUT_CHARGE_KG": 8.0,
     "MAX_PERIMETER_SPACING_MM": 800.0,
-    "MAX_ADVANCE_M": 5.0
+    "MIN_F_VALUE": 0.1,
+    "MIN_UTILIZATION_RATE_PCT": 80.0,
+    "MAX_UTILIZATION_RATE_PCT": 100.0,
+    "MIN_POWDER_FACTOR_KG_M3": 0.8,
+    "MAX_POWDER_FACTOR_KG_M3": 5.5,
+    "MIN_HOLE_DIA_MM": 32.0,
+    "MAX_HOLE_DIA_MM": 75.0
   },
+  "relationships": {
+    "geometry": {
+      "diameter_rule": "excavation_diameter > net_diameter",
+      "area_formula": "S = pi * (excavation_diameter / 2)^2",
+      "MAX_AREA_DEVIATION_PCT": 0.02
+    },
+    "hole_depth": {
+      "depth_rule": "cut_hole_depth > auxiliary_hole_depth",
+      "CUT_HOLE_EXTRA_DEPTH_MIN_M": 0.10,
+      "CUT_HOLE_EXTRA_DEPTH_MAX_M": 0.20
+    },
+    "hole_count": {
+      "total_holes_formula": "total_holes == cut_holes + auxiliary_holes + perimeter_holes"
+    },
+    "advance_depth": {
+      "rule": "advance <= perimeter_hole_depth"
+    },
+    "powder_factor": {
+      "q_formula": "q == Q / (S * advance)",
+      "MAX_Q_DEVIATION_PCT": 0.05
+    }
+  },
+  "required_fields": [
+    "rock_type",
+    "explosive_type",
+    "f_value"
+  ],
   "rock_expert_dict": {
     "花岗": {"q_base": 2.2, "R_coef": 0.80},
     "玄武": {"q_base": 2.0, "R_coef": 0.82},
@@ -23,5 +58,62 @@
     "页岩": {"q_base": 1.4, "R_coef": 0.88},
     "泥岩": {"q_base": 1.3, "R_coef": 0.90},
     "煤": {"q_base": 1.1, "R_coef": 0.95}
+  },
+  "rbr_rules": {
+    "geometry_correction": {
+      "trigger": "abs(extracted_area - (pi * (excavation_diameter / 2)^2)) / (pi * (excavation_diameter / 2)^2) > relationships.geometry.MAX_AREA_DEVIATION_PCT",
+      "action": "replace_area_with_calculated",
+      "level": "warning"
+    },
+    "diameter_inversion_check": {
+      "trigger": "excavation_diameter <= net_diameter",
+      "action": "flag_for_manual_review",
+      "level": "critical"
+    },
+    "hole_count_correction": {
+      "trigger": "total_holes != cut_holes + auxiliary_holes + perimeter_holes",
+      "action": "recalculate_total_holes",
+      "level": "warning"
+    },
+    "hole_depth_validation": {
+      "trigger": "cut_hole_depth <= auxiliary_hole_depth",
+      "action": "flag_for_manual_review",
+      "level": "critical"
+    },
+    "advance_depth_inversion_check": {
+      "trigger": "advance > perimeter_hole_depth",
+      "action": "cap_advance_by_depth_and_R_coef",
+      "level": "critical"
+    },
+    "powder_factor_bounds_check": {
+      "trigger": "q < bounds.MIN_POWDER_FACTOR_KG_M3 or q > bounds.MAX_POWDER_FACTOR_KG_M3",
+      "action": "trigger_re_imputation",
+      "level": "critical"
+    },
+    "q_consistency_check": {
+      "trigger": "abs(q - (Q / (S * advance))) / (Q / (S * advance)) > relationships.powder_factor.MAX_Q_DEVIATION_PCT",
+      "action": "recalculate_q_from_Q_and_volume",
+      "level": "warning"
+    },
+    "utilization_rate_scaling": {
+      "trigger": "utilization_rate <= 1.5",
+      "action": "multiply_by_100",
+      "level": "info"
+    },
+    "utilization_rate_capping": {
+      "trigger": "utilization_rate > bounds.MAX_UTILIZATION_RATE_PCT",
+      "action": "cap_at_max",
+      "level": "warning"
+    },
+    "f_value_validation": {
+      "trigger": "f_value < bounds.MIN_F_VALUE",
+      "action": "trigger_re_imputation",
+      "level": "critical"
+    },
+    "mandatory_field_check": {
+      "trigger": "isnull(rock_type) or isnull(explosive_type)",
+      "action": "drop_record",
+      "level": "fatal"
+    }
   }
 }

@@ -1,6 +1,7 @@
 import os
 import time
-from scraper_module import auto_download_cnki
+# 🔴 这里把 scraper_module 注释掉，因为不需要爬虫了
+# from scraper_module import auto_download_cnki 
 from extractor_module import run_extraction_and_imputation
 from config import TEXT_API_KEY as DEEPSEEK_API_KEY
 
@@ -8,27 +9,26 @@ def main():
     if not DEEPSEEK_API_KEY:
         raise ValueError("❌ 启动失败：未在环境变量或 .env 中找到 DEEPSEEK_API_KEY")
     print("=====================================================")
-    print("🚀 启动 grandMining 端到端自动化流水线")
+    print("🚀 启动 grandMining 端到端自动化流水线 (本地批量文献模式)")
     print("=====================================================\n")
 
     # -------------------------------------------------------
-    # 阶段 1：自动获取工程文献
+    # 阶段 1：自动获取工程文献 (已关闭)
     # -------------------------------------------------------
-    target_keyword = "立井巷道"
-    pages_to_scrape = 5  # 测试阶段建议设为 1
+    # target_keyword = "立井爆破"
+    # pages_to_scrape = 5  
+    # print(f"👉 [阶段 1] 开始执行知网检索与自动下载任务 | 关键词: '{target_keyword}'")
+    # auto_download_cnki(keyword=target_keyword, max_pages=pages_to_scrape)
+    # time.sleep(3)
     
-    print(f"👉 [阶段 1] 开始执行知网检索与自动下载任务 | 关键词: '{target_keyword}'")
-    auto_download_cnki(keyword=target_keyword, max_pages=pages_to_scrape)
-    
-    print("\n⏳ 阶段 1 完成，稍作休眠等待文件系统刷新...")
-    time.sleep(3)
+    print(f"👉 [阶段 1] 检测到采用本地文献提取模式，已跳过知网爬虫下载阶段！")
 
     # -------------------------------------------------------
     # 阶段 2 & 3：多模态特征提取 + 数据黑洞修复
     # -------------------------------------------------------
     # 检查是否有下载到 PDF
     if not os.path.exists("pdfs") or len(os.listdir("pdfs")) == 0:
-        print("❌ 警告：pdfs 目录下没有发现文献，流水线终止。")
+        print("❌ 警告：pdfs 目录下没有发现文献，流水线终止。请确认你的PDF都放在了pdfs文件夹中！")
         return
 
     print(f"\n👉 [阶段 2 & 3] 启动三核混合特征提取与数据重构")

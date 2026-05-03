@@ -19,9 +19,134 @@ warnings.filterwarnings("ignore", category=UserWarning)
 from config import TEXT_MODEL, TEXT_BASE_URL
 
 class BlastingDataImputer:
+    def _apply_rbr_hard_rules(self, df):
+        """
+        【RBR 规则引擎】对接最新的声明式 domain_rules.json
+        执行级别：critical (报错/重置), warning (修正), fatal (剔除)
+        """
+        print("  > 正在执行 [RBR 规则引擎: 挂载高级域知识约束]...")
+        
+        # 提取动态阈值配置
+        bounds = self.config.get("bounds", {})
+        rels = self.config.get("relationships", {})
+        
+        drop_indices = []
+
+        for index, row in df.iterrows():
+
+            # 👇👇👇 【第六步：极端异常值/毒数据排爆】 👇👇👇
+            # 规则 0: 异常进尺排查 (防盲炮/修边爆破数据污染)
+            advance = row.get('单循环进尺_m')
+            min_adv = bounds.get("MIN_ADVANCE_M", 1.0)
+            
+            if pd.notna(advance) and advance < min_adv:
+                print(f"      [Warning] 行 {index}: 发现异常进尺 {advance}m (疑似提取错误或非正常掘进)，强行置空，交由管线重推！")
+                # 强行置空，抹杀毒数据，后续的物理闭环会根据孔深和R值重新算出正确的进尺
+                df.at[index, '单循环进尺_m'] = np.nan
+                advance = np.nan # 更新当前变量，防止影响后续计算
+            # 👆👆👆 ==========================================
+
+            # ==========================================
+            # 规则 1: diameter_inversion_check & geometry_correction
+            # ==========================================
+            D_gross = row.get('井筒荒径_m')
+            D_net = row.get('井筒净径_m')
+            
+            # Action: flag_for_manual_review (此处自动修正并高亮警告)
+            if pd.notna(D_gross) and pd.notna(D_net):
+                if D_gross <= D_net:
+                    print(f"      [Critical] 行 {index}: 荒径({D_gross}m) <= 净径({D_net}m), 触发倒挂修正。")
+                    df.at[index, '井筒荒径_m'], df.at[index, '井筒净径_m'] = D_net, D_gross
+                    D_gross = df.at[index, '井筒荒径_m']
+
+            # Action: replace_area_with_calculated (强制物理推导)
+            # 🔪 删掉了 and '掘进断面积_m2' in df.columns
+            if pd.notna(D_gross): 
+                calculated_area = np.pi * (D_gross / 2)**2
+                df.at[index, '掘进断面积_m2'] = round(calculated_area, 2)
+
+            # ==========================================
+            # 规则 2: hole_depth_validation
+            # ==========================================
+            cut_depth = row.get('一阶掏槽眼深_mm')
+            aux_depths = [
+                row.get('内圈辅助眼孔深_mm', 0), 
+                row.get('外圈辅助眼孔深_mm', 0), 
+                row.get('周边眼孔深_m', 0) * 1000 if pd.notna(row.get('周边眼孔深_m')) else 0
+            ]
+            max_aux_depth = max([d for d in aux_depths if pd.notna(d)] or [0])
+            
+            if max_aux_depth > 0:
+                if pd.isna(cut_depth) or cut_depth <= max_aux_depth:
+                    # 动态读取: CUT_HOLE_EXTRA_DEPTH_MIN_M (单位：米转毫米)
+                    extra_mm = rels.get("hole_depth", {}).get("CUT_HOLE_EXTRA_DEPTH_MIN_M", 0.1) * 1000
+                    df.at[index, '一阶掏槽眼深_mm'] = max_aux_depth + extra_mm
+
+            # ==========================================
+            # 规则 3: hole_count_correction
+            # ==========================================
+            # Action: recalculate_total_holes
+            hole_sub_cols = ['一阶掏槽眼数', '二阶/三阶掏槽眼数', '内圈辅助眼数', '外圈辅助眼数', '周边眼数']
+            # 将 NaN 视作 0 进行加总
+            sub_vals = [row.get(c, 0) if pd.notna(row.get(c)) else 0 for c in hole_sub_cols]
+            total_calculated = sum(sub_vals)
+            
+            # 只要核心的三个圈层（掏槽、辅助、周边）至少有两个有数据，就强制覆盖总炮眼数
+            valid_count = sum(1 for c in hole_sub_cols if pd.notna(row.get(c)))
+            # 🔪 删掉了 and '总炮眼数' in df.columns
+            if valid_count >= 2: 
+                df.at[index, '总炮眼数'] = total_calculated
+
+            # ==========================================
+            # 规则 4: utilization_rate_scaling & capping
+            # ==========================================
+            util_rate = row.get('炮孔利用率')
+            max_util = bounds.get("MAX_UTILIZATION_RATE_PCT", 100.0)
+            if pd.notna(util_rate):
+                try:
+                    util_rate = float(util_rate)
+                    if util_rate <= 2.0:  # 放宽到 2.0，防止个别 1.xx 被漏掉
+                        df.at[index, '炮孔利用率'] = util_rate * 100
+                    elif util_rate > max_util:
+                        df.at[index, '炮孔利用率'] = max_util
+                except ValueError:
+                    pass
+
+            # ==========================================
+            # 规则 5: f_value_validation
+            # ==========================================
+            f_val = row.get('f值_普氏硬度')
+            min_f = bounds.get("MIN_F_VALUE", 0.1)
+            if pd.notna(f_val) and f_val < min_f:
+                # Action: trigger_re_imputation (置空交由后续 XGB/LLM 推导)
+                df.at[index, 'f值_普氏硬度'] = np.nan
+
+            # ==========================================
+            # 规则 6: mandatory_field_check (CBR 致命级约束)
+            # ==========================================
+            rock_type = row.get('岩性')
+            exp_type = row.get('炸药类型')
+            
+            # 由于你的 JSON 中配置了 "action": "drop_record"
+            # 对于 CBR 系统来说，没有岩性和炸药类型的历史数据属于不可达的死数据，必须硬删除
+            if pd.isna(rock_type) or pd.isna(exp_type):
+                drop_indices.append(index)
+
+        # 执行 Fatal 级别的剔除操作
+        if drop_indices:
+            print(f"      [Fatal] 触发 mandatory_field_check，硬删除 {len(drop_indices)} 条确实核心特征的脏数据。")
+            df = df.drop(index=drop_indices).reset_index(drop=True)
+
+        return df
+    
     def __init__(self, api_key, base_url=TEXT_BASE_URL, model_dir="models/"):
         print("🔧 初始化 grandMining 智能数据补全引擎 (增量学习模式)...")
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.client = OpenAI(
+            api_key=api_key, 
+            base_url=base_url,
+            timeout=45.0,     # 设置 45 秒超时，如果 API 45秒不回话，直接切断
+            max_retries=3     # 遇到网络抖动或超时，底层自动重试 3 次
+        )
         self.impute_log = []
         
         # 👇 加载外部物理常量与安规红线配置
@@ -200,59 +325,57 @@ class BlastingDataImputer:
             return df
 
         if mode == "train":
-            # 只有真实数据率>=25%的列才参与，防止劣质列污染模型
+            # 只有真实数据率>=25%的列才参与
             valid_numeric_cols = [col for col in numeric_cols if df[col].notna().mean() >= 0.25]
             if not valid_numeric_cols: return df
             
             with open(self.valid_cols_path, "w", encoding="utf-8") as f:
                 json.dump(valid_numeric_cols, f, ensure_ascii=False)
 
-            scaler = StandardScaler()
-            scaled_data = scaler.fit_transform(df[valid_numeric_cols])
-            joblib.dump(scaler, self.scaler_path)
-
-            # 👇👇👇 核心进化 2：专为小样本采矿工程微调的树模型参数 👇👇👇
+            # 👇 删除了 Scaler，直接上模型
             xgb_estimator = XGBRegressor(
-                n_estimators=150,      # 树的数量适当增加，增强拟合能力
-                max_depth=5,           # 允许更深的逻辑分支 (关联孔距、药量、编码)
-                learning_rate=0.03,    # 降低学习率，步子迈小一点，防止小样本过拟合
-                subsample=0.75,        # 随机抽取 75% 的样本，增加抗噪能力
-                colsample_bytree=0.8,  # 随机抽取 80% 的特征，打破强特征垄断
+                n_estimators=150,      
+                max_depth=5,           
+                learning_rate=0.03,    
+                subsample=0.75,        
+                colsample_bytree=0.8,  
                 random_state=42,
                 n_jobs=-1
             )
             
             imputer = IterativeImputer(
-                estimator=xgb_estimator, max_iter=20, # 增加多重插补的迭代轮数
+                estimator=xgb_estimator, max_iter=20, 
                 random_state=42, min_value=0            
             )
-            imputed_scaled_data = imputer.fit_transform(scaled_data)
+            
+            # 👇 直接用原始量纲数据进行拟合和插补
+            imputed_data = imputer.fit_transform(df[valid_numeric_cols])
             joblib.dump(imputer, self.imputer_path)
+            
+            # 直接写回
+            df[valid_numeric_cols] = np.round(imputed_data, 2)
 
         elif mode == "predict":
-            if not (os.path.exists(self.scaler_path) and os.path.exists(self.imputer_path) and os.path.exists(self.valid_cols_path)):
+            if not (os.path.exists(self.imputer_path) and os.path.exists(self.valid_cols_path)):
                 print("      [!] 找不到预训练模型，请先跑 'train' 模式。")
                 return df
                 
             with open(self.valid_cols_path, "r", encoding="utf-8") as f:
                 valid_numeric_cols = json.load(f)
                 
-            scaler = joblib.load(self.scaler_path)
             imputer = joblib.load(self.imputer_path)
             
-            # 对齐列维度
             missing_cols = set(valid_numeric_cols) - set(df.columns)
             for col in missing_cols: df[col] = np.nan
                 
-            scaled_data = scaler.transform(df[valid_numeric_cols]) 
-            imputed_scaled_data = imputer.transform(scaled_data)   
+            # 👇 直接预测
+            imputed_data = imputer.transform(df[valid_numeric_cols])   
+            df[valid_numeric_cols] = np.round(imputed_data, 2)   
         
         else:
             raise ValueError("Unknown mode")
 
-        # 还原量纲并写回 df
-        final_imputed_data = scaler.inverse_transform(imputed_scaled_data)
-        df[valid_numeric_cols] = np.round(final_imputed_data, 2)
+
 
         # 清理掉临时的编码列，保持表格干净
         for col in encoded_cols:
@@ -260,19 +383,17 @@ class BlastingDataImputer:
                 df.drop(columns=[col], inplace=True)
 
         # ==========================================
-        # ML 后置常识修正层与拓扑锁 (保留原逻辑)
+        # ML 后置常识修正层与拓扑锁 (终极工程绞杀)
         # ==========================================
-
-
         print("      > 正在执行 ML 后置常识修正 (实施最严苛工程绞杀)...")
         for col in valid_numeric_cols:
             if col not in df.columns: continue
             
-            # 1. 炮眼数必须是整数
-            if '数' in col:
+            # 👇 修复 1：强制整数卡控 (把 f值、硬度 加入取整名单，扼杀小数)
+            if '数' in col or 'f值' in col or '硬度' in col:
                 df[col] = df[col].apply(lambda x: np.round(x) if pd.notna(x) else x)
             
-            # 2. 孔深红线 (👇 修复 Bug 1：使用 endswith 精准匹配后缀，避免 _m 拦截 _mm)
+            # 2. 孔深红线
             if '孔深' in col or '眼深' in col:
                 if col.endswith('_mm'):
                     df[col] = df[col].apply(lambda x: min(max(x, self.config["bounds"]["MIN_HOLE_DEPTH_M"]*1000), self.config["bounds"]["MAX_HOLE_DEPTH_M"]*1000) if pd.notna(x) else x)
@@ -297,50 +418,68 @@ class BlastingDataImputer:
             elif '掏槽' in col and '装药' in col:
                 df[col] = df[col].apply(lambda x: min(max(x, 0.1), self.config["bounds"]["MAX_CUT_CHARGE_KG"]) if pd.notna(x) else x)
 
-        # 👇👇👇 修复 Bug 3: 强制物理体积闭环校准 👇👇👇
-        print("      > 正在执行 [终极物理闭环校验]...")
+        # 👇👇👇 终极物理与几何闭环校验 👇👇👇
+        print("      > 正在执行 [终极物理与几何闭环校验]...")
         EXPLOSIVE_DENSITY = self.config["physics"]["EXPLOSIVE_DENSITY_KG_M3"]  
         MAX_CHARGE_COEF = self.config["physics"]["MAX_CHARGE_COEF"]   
         
         for idx, row in df.iterrows():
-            # 获取推算体积所需的核心参数
             D = df.at[idx, '井筒荒径_m'] if '井筒荒径_m' in df.columns else np.nan
             advance = df.at[idx, '单循环进尺_m'] if '单循环进尺_m' in df.columns else np.nan
             q = df.at[idx, '单位炸药消耗量_kg/m3'] if '单位炸药消耗量_kg/m3' in df.columns else np.nan
             Q = df.at[idx, '总装药量_kg'] if '总装药量_kg' in df.columns else np.nan
             
+            # 👇 修复 2：几何公式绝对服从 (强行覆盖瞎猜的断面积)
+            if pd.notna(D) and '掘进断面积_m2' in df.columns:
+                df.at[idx, '掘进断面积_m2'] = round(3.14159 * (D / 2)**2, 2)
+
+            # 👇 修复 3：掏槽超深卡控 (爆破底线：掏槽必须比进尺深至少 200mm)
+            if pd.notna(advance) and '一阶掏槽眼深_mm' in df.columns:
+                min_cut_mm = (advance + 0.2) * 1000 
+                current_cut = df.at[idx, '一阶掏槽眼深_mm']
+                if pd.notna(current_cut) and current_cut < min_cut_mm:
+                    df.at[idx, '一阶掏槽眼深_mm'] = np.round(min_cut_mm, -1) # 拉长并取整到十位
+
             # --- 闭环 A：进尺与孔深的绝对物理挂钩 ---
             perim_depth = df.at[idx, '周边眼孔深_m'] if '周边眼孔深_m' in df.columns else np.nan
             if pd.notna(advance) and pd.notna(perim_depth):
                 if advance >= perim_depth:
                     df.at[idx, '单循环进尺_m'] = round(perim_depth * 0.90, 2)
-                    advance = df.at[idx, '单循环进尺_m'] # 更新 advance 用于后续计算
+                    advance = df.at[idx, '单循环进尺_m'] 
             
-            # --- 闭环 B：总装药量强行服从理论体积模型 ---
+            # --- 闭环 B：总装药量与单耗的绝对数学锁定 ---
             if pd.notna(D) and pd.notna(advance):
-                # 理论体积 S * L
-                volume = 3.14159 * (D / 2)**2 * advance
+                # 重新获取最新的面积 (因为可能刚被修复过)
+                S = df.at[idx, '掘进断面积_m2'] if pd.notna(df.at[idx, '掘进断面积_m2']) else 3.14159 * (D / 2)**2
+                volume = S * advance
                 
-                # 若已有单耗 q，强制覆盖总装药量 Q (击碎 XGBoost 猜出的离谱总药量)
-                if pd.notna(q):
-                    theoretical_Q = volume * q
-                    # 容差检查：如果原始 Q 和理论 Q 偏差超过 15%，强制修正为理论 Q
-                    if pd.isna(Q) or abs(Q - theoretical_Q) / theoretical_Q > 0.15:
-                        if '总装药量_kg' in df.columns:
-                            df.at[idx, '总装药量_kg'] = round(theoretical_Q, 2)
+                if pd.notna(Q) and volume > 0:
+                    # 无论 ML 预测了什么 q，只要有总药量和体积，q 必须反算得出！
+                    df.at[idx, '单位炸药消耗量_kg/m3'] = round(Q / volume, 2)
+                elif pd.notna(q) and pd.isna(Q):
+                    # 如果只有单耗，推导总药量
+                    df.at[idx, '总装药量_kg'] = round(q * volume, 2)
             
-            # --- 闭环 C：体积密度锁 (压制周边单孔药量) ---
+            # --- 闭环 C：体积密度锁 ---
             hole_dia_mm = df.at[idx, '炮孔直径_mm'] if '炮孔直径_mm' in df.columns else np.nan
             if pd.notna(hole_dia_mm) and hole_dia_mm > 0 and pd.notna(perim_depth) and perim_depth > 0:
                 r_m = (hole_dia_mm / 2) / 1000.0
                 hole_area = 3.14159 * (r_m ** 2)
                 max_perim_charge = hole_area * perim_depth * EXPLOSIVE_DENSITY * MAX_CHARGE_COEF
-                
                 if '周边眼单孔装药量_kg' in df.columns:
                     current_perim_charge = df.at[idx, '周边眼单孔装药量_kg']
                     if pd.notna(current_perim_charge) and current_perim_charge > max_perim_charge:
                         df.at[idx, '周边眼单孔装药量_kg'] = round(max_perim_charge, 2)
 
+            # 👇 修复 4：拓扑汇总锁 (用局部眼数之和，强行覆盖总眼数)
+            hole_sub_cols = ['一阶掏槽眼数', '二阶/三阶掏槽眼数', '内圈辅助眼数', '外圈辅助眼数', '周边眼数']
+            valid_sub_cols = [c for c in hole_sub_cols if c in df.columns]
+            if valid_sub_cols and '总炮眼数' in df.columns:
+                sub_vals = df.loc[idx, valid_sub_cols]
+                # 只要算出了3个以上圈层的眼数，总眼数就必须彻底服从加和逻辑
+                if sub_vals.notna().sum() >= 3: 
+                    df.at[idx, '总炮眼数'] = sub_vals.fillna(0).sum()
+                    
         print("      > 正在执行 [拓扑锁] 修正语义化零值...")
         for idx, row in df.iterrows():
             cut1_holes = df.at[idx, '一阶掏槽眼数'] if '一阶掏槽眼数' in df.columns else np.nan
@@ -410,7 +549,7 @@ Return ONLY a valid JSON object containing `reasoning_steps` and the filled nume
                     response = self.client.chat.completions.create(
                         model=TEXT_MODEL, 
                         messages=[{"role": "user", "content": prompt}],
-                        temperature=0.0, # 依然保持绝对零度，封死随机性幻觉
+                        temperature=0.0,
                         response_format={"type": "json_object"}
                     )
                     
@@ -432,7 +571,9 @@ Return ONLY a valid JSON object containing `reasoning_steps` and the filled nume
                             df.at[index, k] = v
                             
                 except Exception as e:
-                    print(f"      [!] 大模型节点重构失败: {e}")
+                    # 👇 打印警告，但不要 raise，让它 continue 执行下一行
+                    print(f"      [!] 行 {index} 大模型节点重构失败 (网络超时或API异常): {e}")
+                    continue
                     
         return df
 
@@ -460,11 +601,49 @@ Return ONLY a valid JSON object containing `reasoning_steps` and the filled nume
         core_cols = ['井筒荒径_m', '炮孔直径_mm', '单循环进尺_m', '周边眼孔深_m', '一阶掏槽眼深_mm']
         df = df.dropna(subset=[c for c in core_cols if c in df.columns], thresh=2)
         print(f"    - 斩杀严重残缺文献: {initial_len - len(df)} 篇，保留优质火种: {len(df)} 篇")
+
+        # 👇👇👇 【第五步核心 1：拍下原始数据的 X 光快照】 👇👇👇
+        print("  > 正在生成数据溯源快照 (记录真实文献依据)...")
+        # 记录最初始的状态：True 代表这个格子原本就是空的
+        original_null_mask = df.isna().copy()
+        # 👆👆👆 =========================================
         
-        # 三重引擎依次点火
-        df = self._fill_by_physics_with_bounds(df)
+        # 👇👇👇 核心修改：引擎点火顺序重组 (注入 RBR 双重防线) 👇👇👇
+        
+        # 1. 前置 RBR 规则拦截：清洗掉 VLM 提取造成的倒挂、量纲错误、致命缺失，为后续提供干净底座
+        df = self._apply_rbr_hard_rules(df)
+        
+        # 2. 基础物理推导打底：利用干净的初始几何数据，进行第一轮数学公式推导
+        df = self._fill_by_physics_with_bounds(df) 
+        
+        # 3. LLM 处理重度残缺行：交由大模型进行 CoT 推演 (此时大模型看到的上下文已经排除了低级物理错误)
+        df = self._fill_by_llm(df)                 
+        
+        # 4. XGBoost 收尾：对剩余的数值空洞进行梯度提升多重插补
         df = self._fill_by_advanced_ml(df, mode=mode) 
-        df = self._fill_by_llm(df)
+        
+        # 5. 后置 RBR 终极兜底：防止 XGBoost 或 LLM 在插值时产生新的物理幻觉（例如掏槽眼反而比进尺浅等）
+        df = self._apply_rbr_hard_rules(df)
+        
+        # 👆👆👆 ================================= 👆👆👆
+
+        # 👇👇👇 【第五步核心 2：根据快照打上溯源水印】 👇👇👇
+        print("  > 正在固化 AI 插补溯源标签...")
+        target_keywords = ['_m', '_mm', '_kg', '数', '率', '面积', '硬度', 'f值']
+        for col in df.columns:
+            if any(kw in col for kw in target_keywords):
+                mask_col_name = f"{col}_溯源"
+                
+                # 🛡️ 终极防弹补丁：如果快照里压根没有这一列（说明是算法中途无中生有推导出来的）
+                # 那么它在“原始状态”下 100% 属于“缺失(True)”
+                if col in original_null_mask.columns:
+                    original_was_null = original_null_mask[col]
+                else:
+                    original_was_null = pd.Series(True, index=df.index)
+                
+                is_imputed = original_was_null & df[col].notna()
+                df[mask_col_name] = is_imputed.map({True: '🤖 AI/算法推导', False: '📄 原始文献数据'})
+        # 👆👆👆 ==========================================
         
         df['数据质量'] = f'S+级 (物理严控 + XGBoost {mode} 模式修正)' 
         
@@ -481,7 +660,7 @@ Return ONLY a valid JSON object containing `reasoning_steps` and the filled nume
 #
 # if __name__ == "__main__":
 #     # 🔴 请在这里填入你真实的 DeepSeek API Key
-#     API_KEY = "：sk-5269491b0b5747a49491267ead088065"  # 记得改这里！
+#     API_KEY = "：111111"  # 记得改这里！
     
 #     # 🔴 确认这是你实际的文件路径
 #     input_file = "outputs/blasting_CBR.xlsx" 
@@ -506,7 +685,7 @@ if __name__ == "__main__":
     
     # 🔴 关键 1：这里一定要换成你那个包含 200 多条数据的新 Excel 的名字！
     # 比如 "outputs/blasting_CBR_dataset_20260501_142504.xlsx"
-    input_file = "outputs/blasting_CBR.xlsx" 
+    input_file = "outputs/blasting_CBR_Master_438.xlsx" 
     
     print("=====================================")
     print("启动独立数据清洗与修复模块 (挂载老经验库)")

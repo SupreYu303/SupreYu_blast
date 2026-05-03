@@ -1,18 +1,14 @@
-# Python 环境与缓存
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-venv/
-env/
+# 核心机密配置（绝对不能上传）
+.env
+config.yaml
+domain_rules.json
 
-# 业务数据与隐私文件 (极其重要)
+# Python 缓存和运行文件
+__pycache__/
+*.pyc
+
+# 数据与模型输出（防止把大量数据集传上去）
 pdfs/
 outputs/
 txt_inputs/
-temp_page_*.jpg
-.env
-config.yaml
-
-# 机器学习模型权重 (建议让别人拉取代码后自己本地训练)
-models/*.pkl
+models/
