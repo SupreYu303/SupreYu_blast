@@ -3,7 +3,7 @@
 
 api:
   text:
-    key: "sk-请替换为你的DeepSeek_API_KEY"
+    key: "your-DeepSeek-API-Key-Here"
     base_url: "https://api.deepseek.com"
     model: "deepseek-chat"
   # 若后续需要切换为智谱 (Zhipu) 的文本大模型，可使用以下配置替换上述 text 配置：
@@ -12,7 +12,7 @@ api:
   #   base_url: "https://open.bigmodel.cn/api/paas/v4/"
   #   model: "glm-4"
   vision:
-    key: "sk-请替换为你的通义千问_API_KEY"
+    key: "your-Qwen-VL-API-Key-Here"
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
     model: "qwen-vl-plus"
 
