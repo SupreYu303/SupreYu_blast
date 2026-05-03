@@ -130,10 +130,10 @@
 
 ```
 blastlimi1/
-├── .env                    # 🔒 环境变量 (API密钥，不上传Git)
+├── .env                    # 🔒 环境变量 
 ├── .gitignore              # Git 忽略规则
-├── config.example.yaml     # 📝 配置模板 (可安全上传)
-├── config.yaml             # ⚠️ 实际配置 (含密钥，不上传Git)
+├── config.example.yaml     # 📝 配置模板 
+├── config.yaml             # ⚠️ 实际配置 
 ├── config.py               # 🔧 配置加载器 (统一读取yaml/env)
 ├── domain_rules.json       # 🛡️ 领域知识规则引擎 (物理常量/安规红线)
 │
