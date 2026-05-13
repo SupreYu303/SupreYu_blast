@@ -2,7 +2,7 @@
   "physics": {
     "EXPLOSIVE_DENSITY_KG_M3": 1200.0,
     "MAX_CHARGE_COEF": 0.8,
-    "ROCK_HARDNESS_THRESHOLD": 8
+    "ROCK_HARDNESS_THRESHOLD": 8.0
   },
   "bounds": {
     "MIN_ADVANCE_M": 1.0,
@@ -30,8 +30,8 @@
     },
     "hole_depth": {
       "depth_rule": "cut_hole_depth > auxiliary_hole_depth",
-      "CUT_HOLE_EXTRA_DEPTH_MIN_M": 0.10,
-      "CUT_HOLE_EXTRA_DEPTH_MAX_M": 0.20
+      "CUT_HOLE_EXTRA_DEPTH_MIN_M": 0.1,
+      "CUT_HOLE_EXTRA_DEPTH_MAX_M": 0.2
     },
     "hole_count": {
       "total_holes_formula": "total_holes == cut_holes + auxiliary_holes + perimeter_holes"
@@ -49,15 +49,82 @@
     "explosive_type",
     "f_value"
   ],
+  "geological_conditions": {
+    "standard_labels": [
+      "节理发育",
+      "岩体完整性差",
+      "岩体较完整",
+      "岩体完整",
+      "层状岩体",
+      "断层破碎带",
+      "强风化",
+      "中风化",
+      "地下水丰富",
+      "复杂地质"
+    ],
+    "keyword_mapping": {
+      "节理发育": ["节理", "裂隙发育", "裂隙密集", "节理密集", "节理较发育", "易片邦", "易片帮", "片邦", "片帮", "节理裂隙", "裂隙较发育"],
+      "岩体完整性差": ["岩体破碎", "极破碎", "完整性差", "较破碎", "岩石破碎", "围岩破碎"],
+      "岩体较完整": ["较完整", "岩体较完整", "围岩基本处于稳定", "围岩较稳定", "围岩稳定", "岩体基本稳定", "岩石致密"],
+      "岩体完整": ["岩体完整", "完整性好", "完整性较好", "岩石坚硬完整", "岩性较硬", "岩性坚硬"],
+      "层状岩体": ["层状", "薄层状", "中厚层状", "厚层状", "互层状", "层状结构", "层理发育"],
+      "断层破碎带": ["断层", "破碎带", "断层泥", "构造破碎"],
+      "强风化": ["强风化", "全风化", "风化砂砾岩", "风化严重", "风化带"],
+      "中风化": ["中风化", "弱风化"],
+      "地下水丰富": ["涌水", "含水层", "地下水丰富", "涌水量大", "涌水量", "地下水位", "水文地质"],
+      "复杂地质": ["地质条件复杂", "地质构造复杂", "地质概况", "水文地质条件", "工程地质"]
+    },
+    "rock_integrity_f_mapping": {
+      "岩体完整": {"f_coef_min": 0.9, "f_coef_max": 1.0},
+      "岩体较完整": {"f_coef_min": 0.8, "f_coef_max": 0.9},
+      "岩体完整性差": {"f_coef_min": 0.6, "f_coef_max": 0.8},
+      "断层破碎带": {"f_coef_min": 0.4, "f_coef_max": 0.6}
+    }
+  },
+  "ring_count": {
+    "MIN_RING_COUNT": 2,
+    "MAX_RING_COUNT": 12,
+    "COMPLEX_BLASTING_THRESHOLD": 6,
+    "typical_ring_structures": {
+      "简单": {"rings": 3, "description": "掏槽1圈+辅助1圈+周边1圈"},
+      "标准": {"rings": 5, "description": "掏槽1-2圈+辅助2圈+周边1圈"},
+      "复杂": {"rings": 6, "description": "掏槽2圈+辅助2-3圈+周边1圈"},
+      "超复杂": {"rings": 8, "description": "掏槽2-3圈+辅助3-4圈+周边1-2圈"}
+    }
+  },
   "rock_expert_dict": {
-    "花岗": {"q_base": 2.2, "R_coef": 0.80},
-    "玄武": {"q_base": 2.0, "R_coef": 0.82},
-    "石英": {"q_base": 2.1, "R_coef": 0.80},
-    "砂岩": {"q_base": 1.8, "R_coef": 0.85},
-    "灰岩": {"q_base": 1.6, "R_coef": 0.88},
-    "页岩": {"q_base": 1.4, "R_coef": 0.88},
-    "泥岩": {"q_base": 1.3, "R_coef": 0.90},
-    "煤": {"q_base": 1.1, "R_coef": 0.95}
+    "花岗": {
+      "q_base": 2.2,
+      "R_coef": 0.8
+    },
+    "玄武": {
+      "q_base": 2.0,
+      "R_coef": 0.82
+    },
+    "石英": {
+      "q_base": 2.1,
+      "R_coef": 0.8
+    },
+    "砂岩": {
+      "q_base": 1.8,
+      "R_coef": 0.85
+    },
+    "灰岩": {
+      "q_base": 1.6,
+      "R_coef": 0.88
+    },
+    "页岩": {
+      "q_base": 1.4,
+      "R_coef": 0.88
+    },
+    "泥岩": {
+      "q_base": 1.3,
+      "R_coef": 0.9
+    },
+    "煤": {
+      "q_base": 1.1,
+      "R_coef": 0.95
+    }
   },
   "rbr_rules": {
     "geometry_correction": {

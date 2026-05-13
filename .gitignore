@@ -6,9 +6,28 @@ domain_rules.json
 # Python 缓存和运行文件
 __pycache__/
 *.pyc
+*.pyo
+.venv/
+venv/
 
 # 数据与模型输出（防止把大量数据集传上去）
 pdfs/
 outputs/
 txt_inputs/
 models/
+
+# 临时文件
+_tmp_*.py
+_scraper_ready.signal
+*_debug.png
+*_debug.html
+temp_*.jpg
+temp_*.png
+wanfang_debug.*
+*.pkl.bak
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

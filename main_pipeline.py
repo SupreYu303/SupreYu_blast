@@ -1,43 +1,119 @@
+# =====================================================================
+# 📄 文件说明：grandMining 端到端自动化流水线 (main_pipeline.py)
+# =====================================================================
+# 【功能概述】
+#   本文件是 grandMining 系统的"完整流水线总控"，串联三个核心阶段：
+#   阶段 1：知网爬虫自动下载工程文献 PDF
+#   阶段 2：三核混合特征提取（PyMuPDF + PaddleOCR + Qwen-VL）
+#   阶段 3：五重递进式数据修复（RBR + 物理推导 + LLM + XGBoost + 终极闭环）
+#
+# 【运行方式】
+#   python main_pipeline.py
+#
+# 【适用场景】
+#   首次大规模采集文献数据，需要从知网自动爬取 PDF 文献的完整流程
+#
+# 【前置条件】
+#   1. 已配置 config.yaml 中的 API 密钥
+#   2. 已安装 Selenium 及 Edge 浏览器（爬虫需要）
+#   3. 网络可访问知网（cnki.net）
+#
+# 【输出产物】
+#   outputs/blasting_CBR_dataset_YYYYMMDD_HHMMSS.xlsx         — 原始特征库
+#   outputs/blasting_CBR_dataset_YYYYMMDD_HHMMSS_Imputed_Bounded.xlsx — 修复后特征库
+#
+# 【依赖模块】
+#   - scraper_module：知网爬虫模块，负责自动下载 PDF 文献
+#   - extractor_module：特征提取模块，负责从 PDF 中提取爆破参数
+#   - config：统一配置加载器，负责读取 API 密钥等配置
+# =====================================================================
+
 import os
 import time
+
+# 导入知网爬虫模块（自动从知网下载 PDF 文献）
 from scraper_module import auto_download_cnki
+
+# 导入特征提取与数据修复一体化流水线函数
 from extractor_module import run_extraction_and_imputation
+
+# 从统一配置中导入 DeepSeek 文本大模型的 API 密钥（作为修复引擎的入参）
 from config import TEXT_API_KEY as DEEPSEEK_API_KEY
 
+
 def main():
+    """
+    端到端自动化流水线主函数，串联三个核心阶段。
+    
+    【执行流程】
+      1. 校验 API 密钥是否已配置
+      2. 启动知网爬虫，自动下载 PDF 文献到 pdfs/ 目录
+      3. 等待文件系统刷新后，启动特征提取与数据修复流水线
+      4. 输出最终的高价值特征库 Excel 文件路径
+    """
+    
+    # -----------------------------------------------------------------
+    # 前置校验：检查 API 密钥是否已正确配置
+    # -----------------------------------------------------------------
+    # 如果密钥为空，说明用户未配置 config.yaml 或环境变量，直接报错退出
     if not DEEPSEEK_API_KEY:
         raise ValueError("❌ 启动失败：未在环境变量或 .env 中找到 DEEPSEEK_API_KEY")
+
     print("=====================================================")
     print("🚀 启动 grandMining 端到端自动化流水线")
     print("=====================================================\n")
 
     # -------------------------------------------------------
-    # 阶段 1：自动获取工程文献
+    # 阶段 1：自动获取工程文献（知网爬虫下载 PDF）
     # -------------------------------------------------------
+    # 【参数说明】
+    #   target_keyword：知网检索关键词，用于搜索相关的采矿爆破文献
+    #   pages_to_scrape：爬取的搜索结果页数，测试阶段建议设为 1
     target_keyword = "立井巷道"
-    pages_to_scrape = 5  # 测试阶段建议设为 1
-    
+    pages_to_scrape = 5  # 测试阶段建议设为 1，正式使用可设为 5~10
+
     print(f"👉 [阶段 1] 开始执行知网检索与自动下载任务 | 关键词: '{target_keyword}'")
-    auto_download_cnki(keyword=target_keyword, max_pages=pages_to_scrape)
     
+    # 调用爬虫模块，自动登录知网、搜索文献、下载 PDF 到 pdfs/ 目录
+    # 注意：首次运行时可能需要人工完成安全验证（人工破盾机制）
+    auto_download_cnki(keyword=target_keyword, max_pages=pages_to_scrape)
+
     print("\n⏳ 阶段 1 完成，稍作休眠等待文件系统刷新...")
+    # 等待 3 秒，确保下载的 PDF 文件完全写入磁盘后再进行下一步处理
     time.sleep(3)
 
     # -------------------------------------------------------
     # 阶段 2 & 3：多模态特征提取 + 数据黑洞修复
     # -------------------------------------------------------
-    # 检查是否有下载到 PDF
+    # 【前置检查】确认 pdfs/ 目录下是否有下载到 PDF 文件
+    # 如果目录不存在或为空，说明爬虫未成功下载任何文献，流水线终止
     if not os.path.exists("pdfs") or len(os.listdir("pdfs")) == 0:
         print("❌ 警告：pdfs 目录下没有发现文献，流水线终止。")
         return
 
     print(f"\n👉 [阶段 2 & 3] 启动三核混合特征提取与数据重构")
-    final_output_path = run_extraction_and_imputation(deepseek_key=DEEPSEEK_API_KEY)
     
+    # 调用一体化流水线函数，完成：
+    #   - PDF 文本提取（PyMuPDF 原生层 + PaddleOCR 视觉兜底）
+    #   - 图纸解析（Qwen-VL 视觉大模型）
+    #   - 参数提取（DeepSeek 文本大模型，40+ 维）
+    #   - 双轨交叉验证与合并
+    #   - 五重递进式数据修复（RBR → 物理推导 → LLM → XGBoost → 终极闭环）
+    final_output_path = run_extraction_and_imputation(deepseek_key=DEEPSEEK_API_KEY)
+
+    # -------------------------------------------------------
+    # 流水线执行完毕，输出最终结果
+    # -------------------------------------------------------
     print("\n=====================================================")
     print(f"🎉 全流程执行完毕！")
     print(f"📂 终极高价值特征库已保存至: {final_output_path}")
     print("=====================================================")
 
+
+# ---------------------------------------------------------------------
+# 程序入口
+# ---------------------------------------------------------------------
+# 当直接运行本文件时（python main_pipeline.py），调用 main() 函数启动流水线
+# 如果被其他模块 import，则不会自动执行，避免副作用
 if __name__ == "__main__":
     main()
